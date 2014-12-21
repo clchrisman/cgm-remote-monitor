@@ -1,3 +1,6 @@
+//TODO: clean up
+var app = {}, browserSettings = {}, browserStorage = $.localStorage;
+
 (function () {
     "use strict";
 
@@ -12,7 +15,7 @@
         , FORMAT_TIME_12 = '%I:%M'
         , FORMAT_TIME_24 = '%H:%M%'
         , FORMAT_TIME_SCALE = '%I %p'
-        , WIDTH_TIME_HIDDEN = 600
+        , WIDTH_TIME_HIDDEN = 500
         , MINUTES_SINCE_LAST_UPDATE_WARN = 10
         , MINUTES_SINCE_LAST_UPDATE_URGENT = 20;
 
@@ -32,8 +35,7 @@
         , alarmSound = 'alarm.mp3'
         , urgentAlarmSound = 'alarm2.mp3';
 
-    var targetTop
-        , targetBottom
+    var tooltip
         , tickValues
         , charts
         , futureOpacity
@@ -416,8 +418,30 @@
             .attr('fill', function (d) { return d.color; })
             .attr('opacity', function (d) { return futureOpacity(d.date.getTime() - latestSGV.x); })
             .attr('stroke-width', function (d) {if (d.type == 'mbg') return 2; else return 0; })
-            .attr('stroke', function (d) { return "white"; })
-            .attr('r', function(d) { if (d.type == 'mbg') return 6; else return 3;});
+            .attr('stroke', function (d) {
+                var device = d.device && d.device.toLowerCase();
+                return (device == 'shugatrak' ? '#a4c2db' : 'white');
+            })
+            .attr('r', function(d) { if (d.type == 'mbg') return 6; else return 4;})
+            .on('mouseover', function (d) {
+                if (d.type != "sgv" && d.type != 'mbg') return;
+
+                var device = d.device && d.device.toLowerCase();
+                var bgType = (d.type == "sgv" ? 'CGM' : (device == 'dexcom' ? 'Calibration' : 'Meter'));
+
+                tooltip.transition().duration(200).style("opacity", .9);
+                tooltip.html('<strong>' + bgType + ' BG:</strong> ' + d.sgv +
+                    (d.type == 'mbg' ? '<br/><strong>Device: </strong>' + d.device : '') +
+                    '<br/><strong>Time:</strong> ' + formatTime(d.date))
+                    .style("left", (d3.event.pageX) + "px")
+                    .style("top", (d3.event.pageY - 28) + "px");
+            })
+            .on('mouseout', function (d) {
+                if (d.type != "sgv" && d.type != 'mbg') return;
+                tooltip.transition()
+                    .duration(500)
+                    .style("opacity", 0);
+            });
 
         focusCircles.exit()
             .remove();
@@ -497,9 +521,9 @@
                   .attr('stroke-width', 2)
                   .attr('stroke', function (d) { return "white"; })
                   .attr('fill', function (d) { return "grey"; })
-                  .on("mouseover", function (d) {
-                      div.transition().duration(200).style("opacity", .9);
-                      div.html("<strong>Time:</strong> " + formatTime(d.created_at) + "<br/>" + "<strong>Treatment type:</strong> " + d.eventType + "<br/>" +
+                  .on('mouseover', function (d) {
+                      tooltip.transition().duration(200).style("opacity", .9);
+                      tooltip.html("<strong>Time:</strong> " + formatTime(d.created_at) + "<br/>" + "<strong>Treatment type:</strong> " + d.eventType + "<br/>" +
                           (d.carbs ? "<strong>Carbs:</strong> " + d.carbs + "<br/>" : '') +
                           (d.insulin ? "<strong>Insulin:</strong> " + d.insulin + "<br/>" : '') +
                           (d.glucose ? "<strong>BG:</strong> " + d.glucose + (d.glucoseType ? ' (' + d.glucoseType + ')': '') + "<br/>" : '') +
@@ -509,11 +533,11 @@
                       .style("left", (d3.event.pageX) + "px")
                       .style("top", (d3.event.pageY - 28) + "px");
                   })
-          .on("mouseout", function (d) {
-              div.transition()
-                  .duration(500)
-                  .style("opacity", 0);
-          });
+                  .on('mouseout', function (d) {
+                      tooltip.transition()
+                          .duration(500)
+                          .style("opacity", 0);
+                  });
             
             treatCircles.attr('clip-path', 'url(#clip)');
         } catch (err) {
@@ -607,9 +631,29 @@
                 focus.append('line')
                     .attr('class', 'high-line')
                     .attr('x1', xScale(dataRange[0]))
-                    .attr('y1', yScale(scaleBg(targetTop)))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_high)))
                     .attr('x2', xScale(dataRange[1]))
-                    .attr('y2', yScale(scaleBg(targetTop)))
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_high)))
+                    .style('stroke-dasharray', ('1, 6'))
+                    .attr('stroke', '#777');
+
+                // add a y-axis line that shows the high bg threshold
+                focus.append('line')
+                    .attr('class', 'target-top-line')
+                    .attr('x1', xScale(dataRange[0]))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_target_top)))
+                    .attr('x2', xScale(dataRange[1]))
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_target_top)))
+                    .style('stroke-dasharray', ('3, 3'))
+                    .attr('stroke', 'grey');
+
+                // add a y-axis line that shows the low bg threshold
+                focus.append('line')
+                    .attr('class', 'target-bottom-line')
+                    .attr('x1', xScale(dataRange[0]))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_target_bottom)))
+                    .attr('x2', xScale(dataRange[1]))
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_target_bottom)))
                     .style('stroke-dasharray', ('3, 3'))
                     .attr('stroke', 'grey');
 
@@ -617,11 +661,11 @@
                 focus.append('line')
                     .attr('class', 'low-line')
                     .attr('x1', xScale(dataRange[0]))
-                    .attr('y1', yScale(scaleBg(targetBottom)))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_low)))
                     .attr('x2', xScale(dataRange[1]))
-                    .attr('y2', yScale(scaleBg(targetBottom)))
-                    .style('stroke-dasharray', ('3, 3'))
-                    .attr('stroke', 'grey');
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_low)))
+                    .style('stroke-dasharray', ('1, 6'))
+                    .attr('stroke', '#777');
 
                 // add a y-axis line that opens up the brush extent from the context to the focus
                 focus.append('line')
@@ -653,9 +697,9 @@
                 context.append('line')
                     .attr('class', 'high-line')
                     .attr('x1', xScale(dataRange[0]))
-                    .attr('y1', yScale2(scaleBg(targetTop)))
+                    .attr('y1', yScale2(scaleBg(app.thresholds.bg_target_top)))
                     .attr('x2', xScale(dataRange[1]))
-                    .attr('y2', yScale2(scaleBg(targetTop)))
+                    .attr('y2', yScale2(scaleBg(app.thresholds.bg_target_top)))
                     .style('stroke-dasharray', ('3, 3'))
                     .attr('stroke', 'grey');
 
@@ -663,9 +707,9 @@
                 context.append('line')
                     .attr('class', 'low-line')
                     .attr('x1', xScale(dataRange[0]))
-                    .attr('y1', yScale2(scaleBg(targetBottom)))
+                    .attr('y1', yScale2(scaleBg(app.thresholds.bg_target_bottom)))
                     .attr('x2', xScale(dataRange[1]))
-                    .attr('y2', yScale2(scaleBg(targetBottom)))
+                    .attr('y2', yScale2(scaleBg(app.thresholds.bg_target_bottom)))
                     .style('stroke-dasharray', ('3, 3'))
                     .attr('stroke', 'grey');
 
@@ -705,23 +749,38 @@
                 // redraw old brush with new dimensions
                 d3.select('.brush').transition().duration(UPDATE_TRANS_MS).call(brush.extent(currentBrushExtent));
 
-                // transition high line to correct location
+                // transition lines to correct location
                 focus.select('.high-line')
                     .transition()
                     .duration(UPDATE_TRANS_MS)
                     .attr('x1', xScale(currentBrushExtent[0]))
-                    .attr('y1', yScale(scaleBg(targetTop)))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_high)))
                     .attr('x2', xScale(currentBrushExtent[1]))
-                    .attr('y2', yScale(scaleBg(targetTop)));
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_high)));
 
-                // transition low line to correct location
+                focus.select('.target-top-line')
+                    .transition()
+                    .duration(UPDATE_TRANS_MS)
+                    .attr('x1', xScale(currentBrushExtent[0]))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_target_top)))
+                    .attr('x2', xScale(currentBrushExtent[1]))
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_target_top)));
+
+                focus.select('.target-bottom-line')
+                    .transition()
+                    .duration(UPDATE_TRANS_MS)
+                    .attr('x1', xScale(currentBrushExtent[0]))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_target_bottom)))
+                    .attr('x2', xScale(currentBrushExtent[1]))
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_target_bottom)));
+
                 focus.select('.low-line')
                     .transition()
                     .duration(UPDATE_TRANS_MS)
                     .attr('x1', xScale(currentBrushExtent[0]))
-                    .attr('y1', yScale(scaleBg(targetBottom)))
+                    .attr('y1', yScale(scaleBg(app.thresholds.bg_low)))
                     .attr('x2', xScale(currentBrushExtent[1]))
-                    .attr('y2', yScale(scaleBg(targetBottom)));
+                    .attr('y2', yScale(scaleBg(app.thresholds.bg_low)));
 
                 // transition open-top line to correct location
                 focus.select('.open-top')
@@ -755,18 +814,18 @@
                     .transition()
                     .duration(UPDATE_TRANS_MS)
                     .attr('x1', xScale2(dataRange[0]))
-                    .attr('y1', yScale2(scaleBg(targetTop)))
+                    .attr('y1', yScale2(scaleBg(app.thresholds.bg_target_top)))
                     .attr('x2', xScale2(dataRange[1]))
-                    .attr('y2', yScale2(scaleBg(targetTop)));
+                    .attr('y2', yScale2(scaleBg(app.thresholds.bg_target_top)));
 
                 // transition low line to correct location
                 context.select('.low-line')
                     .transition()
                     .duration(UPDATE_TRANS_MS)
                     .attr('x1', xScale2(dataRange[0]))
-                    .attr('y1', yScale2(scaleBg(targetBottom)))
+                    .attr('y1', yScale2(scaleBg(app.thresholds.bg_target_bottom)))
                     .attr('x2', xScale2(dataRange[1]))
-                    .attr('y2', yScale2(scaleBg(targetBottom)));
+                    .attr('y2', yScale2(scaleBg(app.thresholds.bg_target_bottom)));
             }
         }
 
@@ -828,12 +887,16 @@
         var color = 'grey';
 
         if (browserSettings.theme == "colors") {
-            if (sgv > targetTop) {
-                color = 'yellow';
-            } else if (sgv >= targetBottom && sgv <= targetTop) {
-                color = '#4cff00';
-            } else if (sgv < targetBottom) {
+            if (sgv > app.thresholds.bg_high) {
                 color = 'red';
+            } else if (sgv > app.thresholds.bg_target_top) {
+                color = 'yellow';
+            } else if (sgv >= app.thresholds.bg_target_bottom && sgv <= app.thresholds.bg_target_top) {
+                color = '#4cff00';
+            } else if (sgv < app.thresholds.bg_low) {
+                color = 'red';
+            } else if (sgv < app.thresholds.bg_target_bottom) {
+                color = 'yellow';
             }
         }
 
@@ -848,10 +911,11 @@
             playAlarm(audio);
             $(this).addClass('playing');
         });
-        var element = document.getElementById('bgButton');
-        element.hidden = '';
-        var element1 = document.getElementById('noButton');
-        element1.hidden = 'true';
+        var bgButton = $('#bgButton');
+        bgButton.show();
+        bgButton.toggleClass("urgent", file == urgentAlarmSound);
+        var noButton = $('#noButton');
+        noButton.hide();
         $('.container .currentBG').text();
 
         if ($(window).width() <= WIDTH_TIME_HIDDEN) {
@@ -870,10 +934,10 @@
 
     function stopAlarm(isClient, silenceTime) {
         alarmInProgress = false;
-        var element = document.getElementById('bgButton');
-        element.hidden = 'true';
-        element = document.getElementById('noButton');
-        element.hidden = '';
+        var bgButton = $('#bgButton');
+        bgButton.hide();
+        var noButton = $('#noButton');
+        noButton.show();
         d3.select('audio.playing').each(function (d, i) {
             var audio = this;
             audio.pause();
@@ -1059,17 +1123,31 @@
     }
 
     function init() {
-        var div = d3.select("body").append("div")
+        tooltip = d3.select("body").append("div")
             .attr("class", "tooltip")
             .style("opacity", 0);
 
-        targetTop = app.thresholds.bg_target_top;
-        targetBottom = app.thresholds.bg_target_bottom;
-
         // Tick Values
-        tickValues = [40, 60, targetBottom, 120, targetTop, 300, 400];
         if (browserSettings.units == "mmol") {
-            tickValues = [2.0, 3.0, Math.round(scaleBg(targetBottom)), 6.0, Math.round(scaleBg(targetTop)), 15.0, 22.0];
+            tickValues = [
+                  2.0
+                , Math.round(scaleBg(app.thresholds.bg_low))
+                , Math.round(scaleBg(app.thresholds.bg_target_bottom))
+                , 6.0
+                , Math.round(scaleBg(app.thresholds.bg_target_top))
+                , Math.round(scaleBg(app.thresholds.bg_high))
+                , 22.0
+            ];
+        } else {
+            tickValues = [
+                  40
+                , app.thresholds.bg_low
+                , app.thresholds.bg_target_bottom
+                , 120
+                , app.thresholds.bg_target_top
+                , app.thresholds.bg_high
+                , 400
+            ];
         }
 
         futureOpacity = d3.scale.linear( )
@@ -1162,7 +1240,7 @@
                 data = data.concat(d[1].map(function (obj) { return { date: new Date(obj.x), y: obj.y, sgv: scaleBg(obj.y), color: 'none', type: 'server-forecast'} }));
 
                 //Add MBG's also, pretend they are SGV's
-                data = data.concat(d[2].map(function (obj) { return { date: new Date(obj.x), y: obj.y, sgv: scaleBg(obj.y), color: 'red', type: 'mbg'} }));
+                data = data.concat(d[2].map(function (obj) { return { date: new Date(obj.x), y: obj.y, sgv: scaleBg(obj.y), color: 'red', type: 'mbg', device: obj.device } }));
 
                 data.forEach(function (d) {
                     if (d.y < 39)
@@ -1190,20 +1268,41 @@
         socket.on('connect', function () {
             console.log('Client connected to server.')
         });
+
+        //with predicted alarms, latestSGV may still be in target so to see if the alarm
+        //  is for a HIGH we can only check if it's >= the bottom of the target
+        function isAlarmForHigh() {
+            return latestSGV.y >= app.thresholds.bg_target_bottom;
+        }
+
+        //with predicted alarms, latestSGV may still be in target so to see if the alarm
+        //  is for a LOW we can only check if it's <= the top of the target
+        function isAlarmForLow() {
+            return !!errorCode || latestSGV.y <= app.thresholds.bg_target_top;
+        }
+
         socket.on('alarm', function () {
-            if (browserSettings.alarmHigh) {
+            console.info("alarm received from server");
+            var enabled = (isAlarmForHigh() && browserSettings.alarmHigh) || (isAlarmForLow() && browserSettings.alarmLow);
+            if (enabled) {
                 console.log("Alarm raised!");
                 currentAlarmType = 'alarm';
                 generateAlarm(alarmSound);
+            } else {
+                console.info("alarm was disabled locally", latestSGV.y, browserSettings);
             }
             brushInProgress = false;
             updateChart(false);
         });
         socket.on('urgent_alarm', function () {
-            if (browserSettings.alarmLow) {
+            console.info("urgent alarm received from server");
+            var enabled = (isAlarmForHigh() && browserSettings.alarmUrgentHigh) || (isAlarmForLow() && browserSettings.alarmUrgentLow);
+            if (enabled) {
                 console.log("Urgent alarm raised!");
                 currentAlarmType = 'urgent_alarm';
                 generateAlarm(urgentAlarmSound);
+            } else {
+                console.info("urgent alarm was disabled locally", latestSGV.y, browserSettings);
             }
             brushInProgress = false;
             updateChart(false);
@@ -1228,7 +1327,6 @@
         });
     }
 
-    var app = {};
     $.ajax("/api/v1/status.json", {
         success: function (xhr) {
             app = { name: xhr.name
@@ -1236,6 +1334,7 @@
                 , head: xhr.head
                 , apiEnabled: xhr.apiEnabled
                 , thresholds: xhr.thresholds
+                , units: xhr.units
                 , careportalEnabled: xhr.careportalEnabled
             };
         }
@@ -1247,6 +1346,7 @@
             $(".serverSettings").show();
         }
         $("#treatmentDrawerToggle").toggle(app.careportalEnabled);
+        browserSettings = getBrowserSettings(browserStorage);
         init();
     });
 
