@@ -8,6 +8,7 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
         , UPDATE_TRANS_MS = 750 // milliseconds
         , ONE_MIN_IN_MS = 60000
         , FIVE_MINS_IN_MS = 300000
+        , SIX_MINS_IN_MS =  360000
         , TWENTY_FIVE_MINS_IN_MS = 1500000
         , THIRTY_MINS_IN_MS = 1800000
         , SIXTY_MINS_IN_MS = 3600000
@@ -16,6 +17,8 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
         , FORMAT_TIME_24 = '%H:%M%'
         , FORMAT_TIME_SCALE = '%I %p'
         , WIDTH_TIME_HIDDEN = 500
+        , WIDTH_SMALL_DOTS = WIDTH_TIME_HIDDEN
+        , WIDTH_BIG_DOTS = 800
         , MINUTES_SINCE_LAST_UPDATE_WARN = 10
         , MINUTES_SINCE_LAST_UPDATE_URGENT = 20;
 
@@ -402,6 +405,17 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
         // selects all our data into data and uses date function to get current max date
         var focusCircles = focus.selectAll('circle').data(focusData, dateFn);
 
+        var focusDotRadius = function(d) {
+            if (d.type == 'mbg')
+                return 6;
+            else if ($(window).width() > WIDTH_BIG_DOTS)
+                return 4;
+            else if ($(window).width() < WIDTH_SMALL_DOTS)
+                return 2;
+            else
+                return 3;
+        };
+
         // if already existing then transition each circle to its new position
         focusCircles
             .transition()
@@ -409,6 +423,7 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
             .attr('cx', function (d) { return xScale(d.date); })
             .attr('cy', function (d) { return yScale(d.sgv); })
             .attr('fill', function (d) { return d.color; })
+            .attr('r', focusDotRadius)
             .attr('opacity', function (d) { return futureOpacity(d.date.getTime() - latestSGV.x); });
 
         // if new circle then just display
@@ -422,7 +437,7 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
                 var device = d.device && d.device.toLowerCase();
                 return (device == 'shugatrak' ? '#a4c2db' : 'white');
             })
-            .attr('r', function(d) { if (d.type == 'mbg') return 6; else return 4;})
+            .attr('r', focusDotRadius)
             .on('mouseover', function (d) {
                 if (d.type != "sgv" && d.type != 'mbg') return;
 
@@ -450,11 +465,12 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
         d3.selectAll('.path').remove();
 
         // add treatment bubbles
-        //
-        //var bubbleSize = prevChartWidth < 400 ? 4 : (prevChartWidth < 600 ? 3 : 2);
-        //focus.selectAll('circle')
-        //    .data(treatments)
-        //    .each(function (d) { drawTreatment(d, bubbleSize, true) });
+
+        var bubbleSize = prevChartWidth < 400 ? 4 : (prevChartWidth < 600 ? 3 : 2);
+        focus.selectAll('circle')
+            .data(treatments)
+            .each(function (d) { drawTreatment(d, bubbleSize, true) });
+
 
         // transition open-top line to correct location
         focus.select('.open-top')
@@ -485,6 +501,13 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
             .attr('x2', xScale(nowDate))
             .attr('y2', yScale(scaleBg(420)));
 
+        context.select('.now-line')
+            .transition()
+            .attr('x1', xScale2(new Date(brush.extent()[1]- THIRTY_MINS_IN_MS)))
+            .attr('y1', yScale2(scaleBg(36)))
+            .attr('x2', xScale2(new Date(brush.extent()[1]- THIRTY_MINS_IN_MS)))
+            .attr('y2', yScale2(scaleBg(420)));
+
         // update x axis
         focus.select('.x.axis')
             .call(xAxis);
@@ -493,8 +516,14 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
         focusCircles.attr('clip-path', 'url(#clip)');
 
         try {
+
+            //NOTE: treatments with insulin or carbs are drawn by drawTreatment()
+            //TODO: integrate with drawTreatment()
+
             // bind up the focus chart data to an array of circles
-            var treatCircles = focus.selectAll('rect').data(treatments);
+            var treatCircles = focus.selectAll('rect').data(treatments.filter(function(treatment) {
+                return !treatment.carbs && !treatment.insulin;
+            }));
 
             // if already existing then transition each circle to its new position
             treatCircles.transition()
@@ -524,8 +553,6 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
                   .on('mouseover', function (d) {
                       tooltip.transition().duration(200).style("opacity", .9);
                       tooltip.html("<strong>Time:</strong> " + formatTime(d.created_at) + "<br/>" + "<strong>Treatment type:</strong> " + d.eventType + "<br/>" +
-                          (d.carbs ? "<strong>Carbs:</strong> " + d.carbs + "<br/>" : '') +
-                          (d.insulin ? "<strong>Insulin:</strong> " + d.insulin + "<br/>" : '') +
                           (d.glucose ? "<strong>BG:</strong> " + d.glucose + (d.glucoseType ? ' (' + d.glucoseType + ')': '') + "<br/>" : '') +
                           (d.enteredBy ? "<strong>Entered by:</strong> " + d.enteredBy + "<br/>" : '') +
                           (d.notes ? "<strong>Notes:</strong> " + d.notes : '')
@@ -832,14 +859,6 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
         // update domain
         xScale2.domain(dataRange);
 
-        context.select('.now-line')
-            .transition()
-            .duration(UPDATE_TRANS_MS)
-            .attr('x1', xScale2(new Date(now)))
-            .attr('y1', yScale2(scaleBg(36)))
-            .attr('x2', xScale2(new Date(now)))
-            .attr('y2', yScale2(scaleBg(420)));
-
         // only if a user brush is not active, update brush and focus chart with recent data
         // else, just transition brush
         var updateBrush = d3.select('.brush').transition().duration(UPDATE_TRANS_MS);
@@ -995,31 +1014,49 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
 
     }
 
+    function calcBGByTime(time) {
+        var closeBGs = data.filter(function(d) {
+            if (!d.y) return false;
+            else {
+                return Math.abs((new Date(d.date)).getTime() - time) <= SIX_MINS_IN_MS;
+            }
+        });
+
+        var totalBG = 0;
+        closeBGs.forEach(function(d) {
+            totalBG += d.y;
+        });
+
+        return totalBG ? (totalBG / closeBGs.length) : 400;
+    }
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     //draw a compact visualization of a treatment (carbs, insulin)
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     function drawTreatment(treatment, scale, showValues) {
-        var carbs = treatment.carbs;
-        var insulin = treatment.insulin;
-        var CR = treatment.CR;
+
+        if (!treatment.carbs && !treatment.insulin) return;
+
+        var CR = treatment.CR || 20;
+        var carbs = treatment.carbs || CR;
+        var insulin = treatment.insulin || 1;
 
         var R1 = Math.sqrt(Math.min(carbs, insulin * CR)) / scale,
             R2 = Math.sqrt(Math.max(carbs, insulin * CR)) / scale,
             R3 = R2 + 8 / scale;
 
         var arc_data = [
-            { 'element': '', 'color': '#9c4333', 'start': -1.5708, 'end': 1.5708, 'inner': 0, 'outer': R1 },
-            { 'element': '', 'color': '#d4897b', 'start': -1.5708, 'end': 1.5708, 'inner': R1, 'outer': R2 },
+            { 'element': '', 'color': 'white', 'start': -1.5708, 'end': 1.5708, 'inner': 0, 'outer': R1 },
             { 'element': '', 'color': 'transparent', 'start': -1.5708, 'end': 1.5708, 'inner': R2, 'outer': R3 },
-            { 'element': '', 'color': '#3d53b7', 'start': 1.5708, 'end': 4.7124, 'inner': 0, 'outer': R1 },
-            { 'element': '', 'color': '#5d72c9', 'start': 1.5708, 'end': 4.7124, 'inner': R1, 'outer': R2 },
+            { 'element': '', 'color': '#0099ff', 'start': 1.5708, 'end': 4.7124, 'inner': 0, 'outer': R1 },
             { 'element': '', 'color': 'transparent', 'start': 1.5708, 'end': 4.7124, 'inner': R2, 'outer': R3 }
         ];
 
-        if (carbs < insulin * CR) arc_data[1].color = 'transparent';
-        if (carbs > insulin * CR) arc_data[4].color = 'transparent';
-        if (carbs > 0) arc_data[2].element = Math.round(carbs) + ' g';
-        if (insulin > 0) arc_data[5].element = Math.round(insulin * 10) / 10 + ' U';
+        arc_data[0].outlineOnly = !treatment.carbs;
+        arc_data[2].outlineOnly = !treatment.insulin;
+
+        if (treatment.carbs > 0) arc_data[1].element = Math.round(treatment.carbs) + ' g';
+        if (treatment.insulin > 0) arc_data[3].element = Math.round(treatment.insulin * 100) / 100 + ' U';
 
         var arc = d3.svg.arc()
             .innerRadius(function (d) { return 5 * d.inner; })
@@ -1031,11 +1068,29 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
             .data(arc_data)
             .enter()
             .append('g')
-            .attr('transform', 'translate(' + xScale(treatment.x) + ', ' + yScale(scaleBg(treatment.y)) + ')');
-
+            .attr('transform', 'translate(' + xScale(treatment.created_at.getTime()) + ', ' + yScale(scaleBg(treatment.glucose || calcBGByTime(treatment.created_at.getTime()))) + ')')
+            .on('mouseover', function () {
+                tooltip.transition().duration(200).style("opacity", .9);
+                tooltip.html("<strong>Time:</strong> " + formatTime(treatment.created_at) + "<br/>" + "<strong>Treatment type:</strong> " + treatment.eventType + "<br/>" +
+                        (treatment.carbs ? "<strong>Carbs:</strong> " + treatment.carbs + "<br/>" : '') +
+                        (treatment.insulin ? "<strong>Insulin:</strong> " + treatment.insulin + "<br/>" : '') +
+                        (treatment.glucose ? "<strong>BG:</strong> " + treatment.glucose + (treatment.glucoseType ? ' (' + treatment.glucoseType + ')': '') + "<br/>" : '') +
+                        (treatment.enteredBy ? "<strong>Entered by:</strong> " + treatment.enteredBy + "<br/>" : '') +
+                        (treatment.notes ? "<strong>Notes:</strong> " + treatment.notes : '')
+                )
+                .style("left", (d3.event.pageX) + "px")
+                .style("top", (d3.event.pageY - 28) + "px");
+            })
+            .on('mouseout', function () {
+                tooltip.transition()
+                    .duration(500)
+                    .style("opacity", 0);
+            });
         var arcs = treatmentDots.append('path')
             .attr('class', 'path')
-            .attr('fill', function (d, i) { return d.color; })
+            .attr('fill', function (d, i) { if (d.outlineOnly) return 'transparent'; else return d.color; })
+            .attr('stroke-width', function (d) {if (d.outlineOnly) return 1; else return 0; })
+            .attr('stroke', function (d) { return d.color; })
             .attr('id', function (d, i) { return 's' + i; })
             .attr('d', arc);
 
@@ -1049,6 +1104,7 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
             label.append('text')
                 .style('font-size', 30 / scale)
                 .style('font-family', 'Arial')
+                .style('text-shadow', '0px 0px 10px rgba(0, 0, 0, 1)')
                 .attr('text-anchor', 'middle')
                 .attr('dy', '.35em')
                 .attr('transform', function (d) {
@@ -1056,7 +1112,7 @@ var app = {}, browserSettings = {}, browserStorage = $.localStorage;
                     d.innerRadius = d.outerRadius * 2.1;
                     return 'translate(' + arc.centroid(d) + ')';
                 })
-                .text(function (d) { return d.element; })
+                .text(function (d) { return d.element; });
         }
     }
 
